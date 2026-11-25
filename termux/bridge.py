@@ -182,10 +182,14 @@ class H(BaseHTTPRequestHandler):
             receipt("TOKEN_ROTATED",{"new_token_fingerprint":hashlib.sha256(new.encode()).hexdigest()[:16]},fsync=True)
             return self.reply({"ok":True,"token":new})
         if self.path=="/expire-pending":
-            surface=d.get("surface_id",""); e=pending.get(surface)
-            if e and e.get("state") not in ("RESTORE_VERIFIED","RESTORE_FAILED","ACCEPTED","EXPIRED","SUPERSEDED"):
-                e["state"]="EXPIRED"; e["actionable"]=False; receipt("DECISION_EXPIRED",{"mismatch_id":e["mismatch_id"],"reason":"OPERATOR_EXPIRE_PENDING"},fsync=True)
-            return self.reply({"ok":True})
+            surface=d.get("surface_id","")
+            targets=[pending.get(surface)] if surface else list(pending.values())
+            count=0
+            for e in targets:
+                if e and e.get("state") not in ("RESTORE_VERIFIED","RESTORE_FAILED","ACCEPTED","EXPIRED","SUPERSEDED"):
+                    e["state"]="EXPIRED"; e["actionable"]=False; count+=1
+                    receipt("DECISION_EXPIRED",{"mismatch_id":e["mismatch_id"],"reason":"OPERATOR_EXPIRE_PENDING"},fsync=True)
+            return self.reply({"ok":True,"expired":count})
         if self.path=="/event":
             if not SPEC_CONFORMANT:
                 receipt("CONFORMANCE_FAILED",{"reason":"ACTION_BLOCKED_SPEC_HASH"},fsync=True); return self.reply({"ok":False,"reason":"SPEC_HASH_MISMATCH"},409)
