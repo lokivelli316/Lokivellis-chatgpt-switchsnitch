@@ -1,14 +1,28 @@
 {
   "manifest_version": 3,
   "name": "Lokivelli's ChatGPT SwitchSnitch",
-  "version": "0.1.0",
-  "description": "Detect unexpected ChatGPT model changes and ask Termux whether to restore or accept them.",
-  "permissions": ["storage"],
-  "host_permissions": ["https://chatgpt.com/*", "http://127.0.0.1:8765/*"],
-  "action": {"default_popup": "popup.html", "default_title": "SwitchSnitch"},
-  "content_scripts": [{
-    "matches": ["https://chatgpt.com/*"],
-    "js": ["content.js"],
-    "run_at": "document_idle"
-  }]
+  "version": "0.2.0",
+  "description": "Authenticated, receipted detection of unexpected ChatGPT model changes with explicit operator decisions.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SwitchSnitch"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
 }
