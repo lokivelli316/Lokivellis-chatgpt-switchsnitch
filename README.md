@@ -2,7 +2,6 @@
 
 ![Lokivelli's ChatGPT Model SwitchSnitch](assets/Lokivellis_ChatGPT_Model_SwitchSnitch.png)
 
-
 Android/Termux-backed watchdog for unexpected ChatGPT model changes.
 
 ## Acceptance boundary
@@ -32,11 +31,15 @@ Repository baseline is implemented. **HOLD for live S24 Ultra/browser verificati
 Requires Termux:API app/package.
 
 ```bash
-pkg install python termux-api
 git clone https://github.com/lokivelli316/Lokivellis-chatgpt-switchsnitch.git
 cd Lokivellis-chatgpt-switchsnitch
 bash termux/install.sh
-python termux/bridge.py
+```
+
+After installation, start SwitchSnitch from anywhere with the one-word command:
+
+```bash
+snitch
 ```
 
 Then load `extension/` as an unpacked WebExtension in a compatible Android/desktop browser. Set the expected model in the extension popup.
