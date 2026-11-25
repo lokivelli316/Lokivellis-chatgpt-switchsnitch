@@ -1,5 +1,8 @@
 # Lokivelli's ChatGPT SwitchSnitch
 
+![Lokivelli's ChatGPT Model SwitchSnitch](assets/Lokivellis_ChatGPT_Model_SwitchSnitch.png)
+
+
 Android/Termux-backed watchdog for unexpected ChatGPT model changes.
 
 ## Acceptance boundary
