@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT=Path.home()/".switchsnitch"; ROOT.mkdir(mode=0o700,exist_ok=True)
 TOKEN=ROOT/"token"; RECEIPTS=ROOT/"receipts.jsonl"; PORT_FILE=ROOT/"port"; SOCK=ROOT/"decision.sock"
-SPEC_VERSION="1.0.0"; SPEC_FILE=Path(__file__).resolve().parents[1]/"SWITCHSNITCH_SECURITY_STATE_MACHINE_SPEC_v1.0.0.md"
+SPEC_VERSION="1.0.0"; EXPECTED_SPEC_SHA256="e073e35744fe8c3bfe3d790e1ddecdeb79ea75c27ba2a9d817a8d165808b2498"; SPEC_FILE=Path(__file__).resolve().parents[1]/"SWITCHSNITCH_SECURITY_STATE_MACHINE_SPEC_v1.0.0.md"
 SCHEMA_VERSION=1; DECISION_TTL=120; SUPPRESSION_TTL=900
 SERVICE="Lokivelli-SwitchSnitch"
 lock=threading.RLock(); pending={}; suppressions={}; issued={}; receipt_seq=0
@@ -13,7 +13,7 @@ health={"notification":"UNKNOWN","security_posture":"SO_PEERCRED_UNVERIFIED","co
 
 def now(): return time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())
 def spec_hash(): return hashlib.sha256(SPEC_FILE.read_bytes()).hexdigest() if SPEC_FILE.exists() else "MISSING"
-SPEC_SHA256=spec_hash()
+SPEC_SHA256=spec_hash(); SPEC_CONFORMANT=(SPEC_SHA256==EXPECTED_SPEC_SHA256)
 
 def token_value():
     if not TOKEN.exists():
@@ -150,12 +150,12 @@ class H(BaseHTTPRequestHandler):
     def headers_out(self,code=200):
         self.send_response(code); self.send_header("Content-Type","application/json")
         self.send_header("Access-Control-Allow-Origin","https://chatgpt.com")
-        self.send_header("Access-Control-Allow-Headers","content-type,x-switchsnitch-token,x-switchsnitch-surface")
+        self.send_header("Access-Control-Allow-Headers","content-type,x-switchsnitch-token,x-switchsnitch-surface,x-switchsnitch-chat,x-switchsnitch-expected")
         self.end_headers()
     def reply(self,obj,code=200): self.headers_out(code); self.wfile.write(json.dumps(obj).encode())
     def do_OPTIONS(self):
         self.send_response(204); self.send_header("Access-Control-Allow-Origin","https://chatgpt.com")
-        self.send_header("Access-Control-Allow-Headers","content-type,x-switchsnitch-token,x-switchsnitch-surface")
+        self.send_header("Access-Control-Allow-Headers","content-type,x-switchsnitch-token,x-switchsnitch-surface,x-switchsnitch-chat,x-switchsnitch-expected")
         self.send_header("Access-Control-Allow-Methods","GET,POST,OPTIONS"); self.end_headers()
     def do_GET(self):
         if self.path=="/health":
@@ -210,12 +210,15 @@ def bind_auto(start=8765,attempts=100):
     raise OSError("No free SwitchSnitch port")
 
 if __name__=="__main__":
-    recover_sequence(); token_value()
-    health["conformance"]="BOUND_TO_RUNTIME_SPEC_HASH"
-    receipt("RUNTIME_STARTED",{"security_posture":health["security_posture"]},fsync=True)
-    threading.Thread(target=socket_loop,daemon=True).start()
+    token_value()
     live=existing_bridge()
     if live: print(f"SwitchSnitch already running on http://127.0.0.1:{live}",flush=True); raise SystemExit(0)
+    recover_sequence()
+    health["conformance"]="CONFORMANT" if SPEC_CONFORMANT else "SPEC_HASH_MISMATCH"
+    receipt("RUNTIME_STARTED",{"security_posture":health["security_posture"],"conformance":health["conformance"]},fsync=True)
+    if not SPEC_CONFORMANT:
+        receipt("CONFORMANCE_FAILED",{"expected_spec_sha256":EXPECTED_SPEC_SHA256,"actual_spec_sha256":SPEC_SHA256},fsync=True)
+    threading.Thread(target=socket_loop,daemon=True).start()
     server=bind_auto(); PORT_FILE.write_text(str(server.server_port))
     print(f"SwitchSnitch listening on http://127.0.0.1:{server.server_port}",flush=True)
     print("Provision extension token with: snitch-token",flush=True)
