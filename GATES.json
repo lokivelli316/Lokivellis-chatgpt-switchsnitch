@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "spec_version": "1.0.0",
+  "status": "HOLD",
+  "gates": [
+    {
+      "id": "GATE-1",
+      "name": "LIVE_CHATGPT",
+      "status": "UNVERIFIED",
+      "requires": [
+        "stable live selector detection",
+        "surface/chat ownership",
+        "restore bounded verification",
+        "real sanitized DOM fixtures"
+      ]
+    },
+    {
+      "id": "GATE-2",
+      "name": "ANDROID_ACTIONABILITY",
+      "status": "UNVERIFIED",
+      "requires": [
+        "notification delivery",
+        "decision TTL/idempotency",
+        "background/Doze visibility",
+        "degraded passive-only behavior"
+      ]
+    },
+    {
+      "id": "GATE-3",
+      "name": "OVERLAY_IME",
+      "status": "UNVERIFIED",
+      "requires": [
+        "FLAG_NOT_FOCUSABLE",
+        "IME open/closed",
+        "cursor/selection preserved",
+        "rotation",
+        "gesture navigation",
+        "3-button navigation",
+        "external keyboard",
+        "scroll position",
+        "true slide-in/out"
+      ]
+    },
+    {
+      "id": "GATE-4",
+      "name": "UNIX_PEER_SECURITY",
+      "status": "UNVERIFIED",
+      "requires": [
+        "SO_PEERCRED target-device evidence"
+      ],
+      "fallback": "FILESYSTEM_PERMISSIONS_ONLY_WEAKER"
+    }
+  ]
+}
