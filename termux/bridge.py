@@ -175,7 +175,20 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if not auth_ok(self): return self.reply({"ok":False,"reason":"AUTH_REJECTED"},401)
         d=read_json(self)
+        if self.path=="/rotate-token":
+            active=[e for e in pending.values() if e.get("actionable") and e.get("state") not in ("RESTORE_VERIFIED","RESTORE_FAILED","ACCEPTED","EXPIRED","SUPERSEDED")]
+            if active: receipt("ROTATION_BLOCKED_PENDING_EVENT",{"count":len(active)}); return self.reply({"ok":False,"reason":"PENDING_EVENT"},409)
+            new=secrets.token_urlsafe(32); TOKEN.write_text(new); os.chmod(TOKEN,0o600)
+            receipt("TOKEN_ROTATED",{"new_token_fingerprint":hashlib.sha256(new.encode()).hexdigest()[:16]},fsync=True)
+            return self.reply({"ok":True,"token":new})
+        if self.path=="/expire-pending":
+            surface=d.get("surface_id",""); e=pending.get(surface)
+            if e and e.get("state") not in ("RESTORE_VERIFIED","RESTORE_FAILED","ACCEPTED","EXPIRED","SUPERSEDED"):
+                e["state"]="EXPIRED"; e["actionable"]=False; receipt("DECISION_EXPIRED",{"mismatch_id":e["mismatch_id"],"reason":"OPERATOR_EXPIRE_PENDING"},fsync=True)
+            return self.reply({"ok":True})
         if self.path=="/event":
+            if not SPEC_CONFORMANT:
+                receipt("CONFORMANCE_FAILED",{"reason":"ACTION_BLOCKED_SPEC_HASH"},fsync=True); return self.reply({"ok":False,"reason":"SPEC_HASH_MISMATCH"},409)
             if d.get("type")=="OBSERVED_MODEL_UNVERIFIED":
                 receipt("OBSERVED_MODEL_UNVERIFIED",d); return self.reply({"ok":True,"actionable":False})
             return self.reply({"ok":True,"event":create_mismatch(d)})
