@@ -13,8 +13,16 @@ def read_json(handler):
     n=int(handler.headers.get("content-length","0"))
     return json.loads(handler.rfile.read(n) or b"{}")
 
+def hotkey_signal(action, expected="UNVERIFIED", selected="UNVERIFIED"):
+    cmd=["am","broadcast","-a",f"com.lokivelli.hotkeyprompter.{action}",
+         "-p","com.lokivelli.hotkeyprompter",
+         "--es","expected",str(expected),"--es","selected",str(selected)]
+    try: subprocess.run(cmd,check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    except FileNotFoundError: pass
+
 def notify(e):
     expected=e.get("expected","UNVERIFIED"); selected=e.get("selected","UNVERIFIED")
+    hotkey_signal("SWITCHSNITCH_ALERT", expected, selected)
     cmd=["termux-notification","--id","switchsnitch","--priority","max",
          "--title","⚠ CHATGPT MODEL SWITCH",
          "--content",f"Expected {expected} — detected {selected}",
@@ -47,6 +55,7 @@ class H(BaseHTTPRequestHandler):
             threading.Thread(target=notify,args=(data,),daemon=True).start()
         elif self.path=="/receipt":
             with RECEIPTS.open("a") as f:f.write(json.dumps(data,separators=(",",":"))+"\n")
+            hotkey_signal("SWITCHSNITCH_RESOLVED", data.get("target","UNVERIFIED"), data.get("selected_after","UNVERIFIED"))
         else:
             self.cors(404); self.wfile.write(b'{}'); return
         self.cors(); self.wfile.write(b'{"ok":true}')
