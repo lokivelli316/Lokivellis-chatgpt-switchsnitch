@@ -55,3 +55,6 @@ The bridge binds to loopback only. It does not expose a LAN listener. Receipts c
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## Native Android and recovery upgrade
+Browser transport, retry and observer health have been repaired. The additive native Android companion is documented in [android/](android/README.md). Existing checkouts: run `git pull --ff-only origin main` then `bash termux/activate.sh`. APK test builds are published to [Releases](../../releases) by CI. The frozen specification is unchanged. Native restore requires stable chat identity and operator approval. Device acceptance and backend model identity are unverified.

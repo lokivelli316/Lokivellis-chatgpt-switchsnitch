@@ -8,7 +8,7 @@ TOKEN=ROOT/"token"; RECEIPTS=ROOT/"receipts.jsonl"; PORT_FILE=ROOT/"port"; SOCK=
 SPEC_VERSION="1.0.0"; EXPECTED_SPEC_SHA256="e073e35744fe8c3bfe3d790e1ddecdeb79ea75c27ba2a9d817a8d165808b2498"; SPEC_FILE=Path(__file__).resolve().parents[1]/"SWITCHSNITCH_SECURITY_STATE_MACHINE_SPEC_v1.0.0.md"
 SCHEMA_VERSION=1; DECISION_TTL=120; SUPPRESSION_TTL=900
 SERVICE="Lokivelli-SwitchSnitch"
-lock=threading.RLock(); pending={}; suppressions={}; issued={}; receipt_seq=0
+lock=threading.RLock(); pending={}; suppressions={}; issued={}; receipt_seq=0; surfaces={}; auth_rejections={}; TERMINAL={"RESTORE_VERIFIED","RESTORE_FAILED","ACCEPTED","EXPIRED","SUPERSEDED"}
 health={"notification":"UNKNOWN","security_posture":"SO_PEERCRED_UNVERIFIED","conformance":"UNKNOWN"}
 
 def now(): return time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())
@@ -48,7 +48,12 @@ def receipt(event_type,data=None,fsync=False):
 def auth_ok(h):
     supplied=h.headers.get("X-SwitchSnitch-Token","")
     ok=secrets.compare_digest(supplied,token_value())
-    if not ok: receipt("AUTH_REJECTED",{"surface":h.headers.get("X-SwitchSnitch-Surface","UNKNOWN")})
+    if not ok:
+        with lock:
+            key=h.client_address[0]; t=time.monotonic(); last,count=auth_rejections.get(key,(0,0))
+            if t-last>=10:
+                receipt("AUTH_REJECTED",{"count":count+1}); auth_rejections[key]=(t,0)
+            else: auth_rejections[key]=(last,count+1)
     return ok
 
 def hotkey_signal(action,**extras):
@@ -74,7 +79,7 @@ def notify(e):
         if cur and cur["mismatch_id"]==mid:
             if delivered:
                 cur["state"]="DECISION_PENDING"; cur["actionable"]=True
-                health["notification"]="OK"; receipt("NOTIFICATION_DELIVERED",{"mismatch_id":mid,"surface_id":surface})
+                health["notification"]="COMMAND_ACCEPTED_DEVICE_VISIBILITY_UNVERIFIED"; receipt("NOTIFICATION_DELIVERED",{"mismatch_id":mid,"surface_id":surface})
                 hotkey_signal("SWITCHSNITCH_ALERT",mismatch_id=mid)
             else:
                 cur["state"]="NOTIFICATION_FAILED"; cur["actionable"]=False
@@ -86,6 +91,7 @@ def create_mismatch(d):
     sk=(surface,chat,selected)
     if suppressions.get(sk,0)>time.time(): receipt("SUPPRESSED",{"surface_id":surface,"chat_id":chat}); return None
     old=pending.get(surface)
+    if old and old["state"] not in TERMINAL and old["state"]!="NOTIFICATION_FAILED" and old["expires_epoch"]>time.time() and (old["chat_id"],old["expected_at_event"],old["selected_at_event"])==(chat,d["expected_at_event"],selected): return old
     predecessor=d.get("predecessor_id")
     if old and old["state"] not in ("RESTORE_VERIFIED","ACCEPTED","EXPIRED","SUPERSEDED","RESTORE_FAILED"):
         old["state"]="SUPERSEDED"; receipt("MISMATCH_SUPERSEDED",{"mismatch_id":old["mismatch_id"],"surface_id":surface})
@@ -108,7 +114,7 @@ def issue(surface,chat,current_expected):
         if time.time()>e["expires_epoch"]:
             e["state"]="EXPIRED"; receipt("DECISION_EXPIRED",{"mismatch_id":e["mismatch_id"]},fsync=True); return {"action":"NOOP","reason":"EXPIRED"}
         if e["state"]=="DECISION_ISSUED":return {"action":"NOOP","reason":"ALREADY_ISSUED","mismatch_id":e["mismatch_id"]}
-        if not e.get("actionable"):return {"action":"NOOP","reason":e["state"]}
+        if e["state"] in TERMINAL or not e.get("actionable"):return {"action":"NOOP","reason":e["state"]}
         dec=issued.get(e["mismatch_id"])
         if not dec:return {"action":"NOOP","reason":"AWAITING_OPERATOR","mismatch_id":e["mismatch_id"]}
         e["state"]="DECISION_ISSUED"; receipt("DECISION_ISSUED",{"mismatch_id":e["mismatch_id"],"action":dec})
@@ -120,7 +126,8 @@ def operator_decision(action,mid):
         if not e:return {"ok":False,"reason":"UNKNOWN_ID"}
         if time.time()>e["expires_epoch"]:
             e["state"]="EXPIRED"; receipt("DECISION_EXPIRED",{"mismatch_id":mid},fsync=True); return {"ok":False,"reason":"EXPIRED"}
-        if not e.get("actionable"):return {"ok":False,"reason":e["state"]}
+        if action not in ("RESTORE","ACCEPT"):return {"ok":False,"reason":"BAD_ACTION"}
+        if e["state"]!="DECISION_PENDING" or mid in issued or not e.get("actionable"):return {"ok":False,"reason":e["state"]}
         issued[mid]=action; receipt("DECISION_"+action,{"mismatch_id":mid},fsync=True); return {"ok":True}
 
 def socket_loop():
@@ -144,7 +151,11 @@ def socket_loop():
             c.sendall((json.dumps(out)+"\n").encode())
 
 def read_json(h):
-    n=int(h.headers.get("content-length","0")); return json.loads(h.rfile.read(n) or b"{}")
+    n=int(h.headers.get("content-length","0"))
+    if n<0 or n>65536: raise ValueError("BODY_SIZE")
+    d=json.loads(h.rfile.read(n) or b"{}")
+    if not isinstance(d,dict): raise ValueError("BODY_TYPE")
+    return d
 
 class H(BaseHTTPRequestHandler):
     def headers_out(self,code=200):
@@ -162,7 +173,8 @@ class H(BaseHTTPRequestHandler):
             authorized=auth_ok(self)
             base={"ok":True,"service":SERVICE,"port":self.server.server_port,"authenticated":authorized,
                   "spec_version":SPEC_VERSION,"spec_sha256":SPEC_SHA256}
-            if authorized: base.update(health)
+            if authorized:
+                with lock: base.update(health); base["surfaces"]={k:{**v,"age_s":round(time.monotonic()-v["seen"],1)} for k,v in surfaces.items()}
             return self.reply(base,200 if authorized else 401)
         if not auth_ok(self): return self.reply({"ok":False,"reason":"AUTH_REJECTED"},401)
         if self.path=="/decision":
@@ -174,7 +186,16 @@ class H(BaseHTTPRequestHandler):
         return self.reply({},404)
     def do_POST(self):
         if not auth_ok(self): return self.reply({"ok":False,"reason":"AUTH_REJECTED"},401)
-        d=read_json(self)
+        try: d=read_json(self)
+        except (ValueError,TypeError): return self.reply({"ok":False,"reason":"BAD_REQUEST"},400)
+        if self.path=="/surface":
+            sid=self.headers.get("X-SwitchSnitch-Surface","")
+            if not sid or len(sid)>128:return self.reply({"ok":False,"reason":"BAD_SURFACE"},400)
+            with lock:
+                if len(surfaces)>=256 and sid not in surfaces: surfaces.pop(min(surfaces,key=lambda x:surfaces[x]["seen"]))
+                old=surfaces.get(sid,{}); state=str(d.get("state","UNKNOWN"))[:80]; surfaces[sid]={"state":state,"seen":time.monotonic()}
+                if old.get("state")!=state:receipt("SURFACE_HEALTH",{"surface_id":sid,"state":state})
+            return self.reply({"ok":True})
         if self.path=="/rotate-token":
             active=[e for e in pending.values() if e.get("actionable") and e.get("state") not in ("RESTORE_VERIFIED","RESTORE_FAILED","ACCEPTED","EXPIRED","SUPERSEDED")]
             if active: receipt("ROTATION_BLOCKED_PENDING_EVENT",{"count":len(active)}); return self.reply({"ok":False,"reason":"PENDING_EVENT"},409)
@@ -195,7 +216,8 @@ class H(BaseHTTPRequestHandler):
                 receipt("CONFORMANCE_FAILED",{"reason":"ACTION_BLOCKED_SPEC_HASH"},fsync=True); return self.reply({"ok":False,"reason":"SPEC_HASH_MISMATCH"},409)
             if d.get("type")=="OBSERVED_MODEL_UNVERIFIED":
                 receipt("OBSERVED_MODEL_UNVERIFIED",d); return self.reply({"ok":True,"actionable":False})
-            return self.reply({"ok":True,"event":create_mismatch(d)})
+            if d.get("type")!="MODEL_MISMATCH" or any(not isinstance(d.get(k),str) or not d[k] or len(d[k])>512 for k in ("surface_id","chat_id","expected_at_event","selected_at_event")) or d["surface_id"]!=self.headers.get("X-SwitchSnitch-Surface") or d["chat_id"]!=self.headers.get("X-SwitchSnitch-Chat") or d["expected_at_event"]!=self.headers.get("X-SwitchSnitch-Expected") or d["selected_at_event"]=="UNVERIFIED":return self.reply({"ok":False,"reason":"INVALID_EVENT"},400)
+            with lock: return self.reply({"ok":True,"event":create_mismatch(d)})
         if self.path=="/receipt":
             et=d.pop("event_type","EXTENSION_RECEIPT"); receipt(et,d,fsync=et in ("RESTORE_VERIFIED","RESTORE_FAILED","ACCEPTED"))
             mid=d.get("mismatch_id")
@@ -223,7 +245,7 @@ def bind_auto(start=8765,attempts=100):
     for p in range(start,start+attempts):
         try:return ThreadingHTTPServer(("127.0.0.1",p),H)
         except OSError as e:
-            if getattr(e,"errno",None)!=98:raise
+            if getattr(e,"errno",None) not in (98,48,10048):raise
     raise OSError("No free SwitchSnitch port")
 
 if __name__=="__main__":

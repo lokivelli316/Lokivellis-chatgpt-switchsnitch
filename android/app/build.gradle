@@ -1,0 +1,7 @@
+plugins { id 'com.android.application' }
+android {
+ namespace 'com.lokivelli.switchsnitch'
+ compileSdk 35
+ defaultConfig { applicationId 'com.lokivelli.switchsnitch'; minSdk 26; targetSdk 35; versionCode 1; versionName '0.2.1-native' }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}

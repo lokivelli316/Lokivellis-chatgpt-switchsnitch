@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lokivelli's ChatGPT SwitchSnitch",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Authenticated, receipted detection of unexpected ChatGPT model changes with explicit operator decisions.",
   "permissions": [
     "storage"
@@ -24,5 +24,8 @@
       ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
 }
